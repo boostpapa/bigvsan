@@ -243,7 +243,7 @@ class MelDataset(torch.utils.data.Dataset):
         self.mel_type = mel_type
 
         if mel_type == "pytorch":
-            self.mel_pytorch = MelSpectrogramFeatures(sampling_rate=sampling_rate,
+            self.mel_pytorch = MelSpectrogramFeatures(sample_rate=sampling_rate,
                                                       n_fft=n_fft,
                                                       hop_length=hop_size,
                                                       win_length=win_size,
