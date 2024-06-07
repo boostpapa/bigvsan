@@ -107,7 +107,7 @@ def train(rank, a, h):
     trainset = MelDataset(training_filelist, h, h.segment_size, h.n_fft, h.num_mels,
                           h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=0,
                           shuffle=False if h.num_gpus > 1 else True, fmax_loss=h.fmax_for_loss, device=device,
-                          fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir, is_seen=True)
+                          fine_tuning=a.fine_tuning, base_mels_path=a.input_mels_dir, is_seen=True, mel_type=h.mel_type)
 
     train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
 
@@ -121,7 +121,7 @@ def train(rank, a, h):
         validset = MelDataset(validation_filelist, h, h.segment_size, h.n_fft, h.num_mels,
                               h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=0,
                               fmax_loss=h.fmax_for_loss, device=device, fine_tuning=a.fine_tuning,
-                              base_mels_path=a.input_mels_dir, is_seen=True)
+                              base_mels_path=a.input_mels_dir, is_seen=True, mel_type=h.mel_type)
         validation_loader = DataLoader(validset, num_workers=1, shuffle=False,
                                        sampler=None,
                                        batch_size=1,
@@ -134,7 +134,7 @@ def train(rank, a, h):
             unseen_validset = MelDataset(list_unseen_validation_filelist[i], h, h.segment_size, h.n_fft, h.num_mels,
                                          h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=0,
                                          fmax_loss=h.fmax_for_loss, device=device, fine_tuning=a.fine_tuning,
-                                         base_mels_path=a.input_mels_dir, is_seen=False)
+                                         base_mels_path=a.input_mels_dir, is_seen=False, mel_type=h.mel_type)
             unseen_validation_loader = DataLoader(unseen_validset, num_workers=1, shuffle=False,
                                                   sampler=None,
                                                   batch_size=1,
