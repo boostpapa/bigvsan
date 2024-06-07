@@ -249,7 +249,7 @@ class MelDataset(torch.utils.data.Dataset):
                                                       win_length=win_size,
                                                       n_mels=num_mels,
                                                       mel_fmin=fmin,)
-            print(f"Warning use torchaudio.transforms.MelSpectrogram extract mel.")
+            #print(f"Warning use torchaudio.transforms.MelSpectrogram extract mel.")
 
 
         '''
