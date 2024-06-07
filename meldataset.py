@@ -14,22 +14,25 @@ import numpy as np
 from librosa.util import normalize
 from scipy.io.wavfile import read
 from librosa.filters import mel as librosa_mel_fn
+import librosa
+import soundfile as sf
 import pathlib
-from tqdm import tqd
+from tqdm import tqdm
 
 MAX_WAV_VALUE = 32768.0
 
 
-'''
 def load_wav(full_path, sr_target):
-    sampling_rate, data = read(full_path)
+    data, sampling_rate = sf.read(full_path)
     if sampling_rate != sr_target:
-        raise RuntimeError("Sampling rate of the file {} is {} Hz, but the model requires {} Hz".
-              format(full_path, sampling_rate, sr_target))
-    return data, sampling_rate
+        #raise RuntimeError("Sampling rate of the file {} is {} Hz, but the model requires {} Hz".
+        #      format(full_path, sampling_rate, sr_target))
+        print(f"Warning: {full_path}, wave shape: {data.shape}, sample_rate: {sampling_rate}")
+        data = librosa.resample(data, sampling_rate, sr_target)
+    return data, sr_target
+
+
 '''
-
-
 def load_wav(audiopath, sampling_rate):
 
     audio, sr = torchaudio.load(audiopath)
@@ -47,6 +50,7 @@ def load_wav(audiopath, sampling_rate):
     # clip audio invalid values
     audio.clip_(-1, 1)
     return audio, sr
+'''
 
 
 def dynamic_range_compression(x, C=1, clip_val=1e-5):
@@ -172,9 +176,11 @@ class MelDataset(torch.utils.data.Dataset):
         self.fine_tuning = fine_tuning
         self.base_mels_path = base_mels_path
 
+        '''
         print("INFO: checking dataset integrity...")
         for i in tqdm(range(len(self.audio_files))):
             assert os.path.exists(self.audio_files[i]), "{} not found".format(self.audio_files[i])
+        '''
 
     def __getitem__(self, index):
 
