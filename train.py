@@ -20,7 +20,7 @@ import torch.multiprocessing as mp
 from torch.distributed import init_process_group
 from torch.nn.parallel import DistributedDataParallel
 from env import AttrDict, build_env
-from meldataset import MelDataset, mel_spectrogram, get_dataset_filelist, MAX_WAV_VALUE
+from meldataset import MelDataset, mel_spectrogram, get_dataset_filelist1, MAX_WAV_VALUE
 from models import BigVSAN, MultiPeriodDiscriminator, MultiResolutionDiscriminator,\
     feature_loss, generator_loss, discriminator_loss
 from utils import plot_spectrogram, plot_spectrogram_clipped, scan_checkpoint, load_checkpoint, save_checkpoint, save_audio
@@ -102,7 +102,7 @@ def train(rank, a, h):
     # define training and validation datasets
     # unseen_validation_filelist will contain sample filepaths outside the seen training & validation dataset
     # example: trained on LibriTTS, validate on VCTK
-    training_filelist, validation_filelist, list_unseen_validation_filelist = get_dataset_filelist(a)
+    training_filelist, validation_filelist, list_unseen_validation_filelist = get_dataset_filelist1(a)
 
     trainset = MelDataset(training_filelist, h, h.segment_size, h.n_fft, h.num_mels,
                           h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=0,

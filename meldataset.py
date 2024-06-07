@@ -8,23 +8,45 @@ import math
 import os
 import random
 import torch
+import torchaudio
 import torch.utils.data
 import numpy as np
 from librosa.util import normalize
 from scipy.io.wavfile import read
 from librosa.filters import mel as librosa_mel_fn
 import pathlib
-from tqdm import tqdm
+from tqdm import tqd
 
 MAX_WAV_VALUE = 32768.0
 
 
+'''
 def load_wav(full_path, sr_target):
     sampling_rate, data = read(full_path)
     if sampling_rate != sr_target:
         raise RuntimeError("Sampling rate of the file {} is {} Hz, but the model requires {} Hz".
               format(full_path, sampling_rate, sr_target))
     return data, sampling_rate
+'''
+
+
+def load_wav(audiopath, sampling_rate):
+
+    audio, sr = torchaudio.load(audiopath)
+    #print(f"wave shape: {audio.shape}, sample_rate: {sr}")
+
+    if audio.size(0) > 1:  # mix to mono
+        audio = audio[0].unsqueeze(0)
+
+    if sr != sampling_rate:
+        try:
+            audio = torchaudio.functional.resample(audio, sr, sampling_rate)
+        except Exception as e:
+            print(f"Warning: {audiopath}, wave shape: {audio.shape}, sample_rate: {sr}")
+            return None
+    # clip audio invalid values
+    audio.clip_(-1, 1)
+    return audio, sr
 
 
 def dynamic_range_compression(x, C=1, clip_val=1e-5):
@@ -104,6 +126,18 @@ def get_dataset_filelist(a):
             list_unseen_validation_files.append(unseen_validation_files)
 
     return training_files, validation_files, list_unseen_validation_files
+
+
+def get_dataset_filelist1(a):
+    training_files = []
+    validation_files = []
+    with open(a.input_training_file, 'r', encoding='utf-8') as fi:
+        for line in fi:
+            training_files.append(line.strip())
+    with open(a.input_validation_file, 'r', encoding='utf-8') as fi:
+        for line in fi:
+            validation_files.append(line.strip())
+    return training_files, validation_files, validation_files
 
 
 class MelDataset(torch.utils.data.Dataset):
