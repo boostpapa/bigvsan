@@ -20,7 +20,7 @@ import torch.multiprocessing as mp
 from torch.distributed import init_process_group
 from torch.nn.parallel import DistributedDataParallel
 from env import AttrDict, build_env
-from meldataset import MelDataset, mel_spectrogram, get_dataset_filelist1, MAX_WAV_VALUE
+from meldataset import MelDataset, mel_spectrogram, MelSpectrogramFeatures, get_dataset_filelist1, MAX_WAV_VALUE
 from models import BigVSAN, MultiPeriodDiscriminator, MultiResolutionDiscriminator,\
     feature_loss, generator_loss, discriminator_loss
 from utils import plot_spectrogram, plot_spectrogram_clipped, scan_checkpoint, load_checkpoint, save_checkpoint, save_audio
@@ -53,6 +53,15 @@ def train(rank, a, h):
     # define additional discriminators. BigVSAN uses MRD as default
     mrd = MultiResolutionDiscriminator(h).to(device)
     print("Discriminator mrd params: {}".format(sum(p.numel() for p in mrd.parameters())))
+
+    if h.mel_type == "pytorch":
+        mel_pytorch = MelSpectrogramFeatures(sampling_rate=h.sampling_rate,
+                                             n_fft=h.n_fft,
+                                             hop_length=h.hop_size,
+                                             win_length=h.win_size,
+                                             n_mels=h.num_mels,
+                                             mel_fmin=h.fmin,)
+        print(f"Warning use torchaudio.transforms.MelSpectrogram extract mel.")
 
     # create or scan the latest checkpoint from checkpoints directory
     if rank == 0:
@@ -180,9 +189,12 @@ def train(rank, a, h):
                 else:
                     y_g_hat = generator(x.to(device))
                 y_mel = y_mel.to(device, non_blocking=True)
-                y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
-                                              h.hop_size, h.win_size,
-                                              h.fmin, h.fmax_for_loss)
+                if h.mel_type == "pytorch":
+                    y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))[0]
+                else:
+                    y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
+                                                  h.hop_size, h.win_size,
+                                                  h.fmin, h.fmax_for_loss)
                 val_err_tot += F.l1_loss(y_mel, y_g_hat_mel).item()
 
                 # PESQ calculation. only evaluate PESQ if it's speech signal (nonspeech PESQ will error out)
@@ -209,9 +221,12 @@ def train(rank, a, h):
                     if a.save_audio: # also save audio to disk if --save_audio is set to True
                         save_audio(y_g_hat[0, 0], os.path.join(a.checkpoint_path, 'samples', '{}_{:08d}'.format(mode, steps), '{:04d}.wav'.format(j)), h.sampling_rate)
                     # spectrogram of synthesized audio
-                    y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels,
-                                                 h.sampling_rate, h.hop_size, h.win_size,
-                                                 h.fmin, h.fmax)
+                    if h.mel_type == "pytorch":
+                        y_hat_spec = mel_pytorch(y_g_hat.squeeze(1))[0]
+                    else:
+                        y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels,
+                                                     h.sampling_rate, h.hop_size, h.win_size,
+                                                     h.fmin, h.fmax)
                     sw.add_figure('generated_{}/y_hat_spec_{}'.format(mode, j),
                                   plot_spectrogram(y_hat_spec.squeeze(0).cpu().numpy()), steps)
                     # visualization of spectrogram difference between GT and synthesized audio
@@ -265,8 +280,11 @@ def train(rank, a, h):
             y = y.unsqueeze(1)
 
             y_g_hat = generator(x)
-            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size,
-                                          h.fmin, h.fmax_for_loss)
+            if h.mel_type == "pytorch":
+                y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))[0]
+            else:
+                y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size,
+                                              h.fmin, h.fmax_for_loss)
 
             optim_d.zero_grad()
 
