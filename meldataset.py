@@ -18,6 +18,7 @@ import librosa
 import soundfile as sf
 import pathlib
 from tqdm import tqdm
+from torch import nn
 
 MAX_WAV_VALUE = 32768.0
 
@@ -81,6 +82,66 @@ def spectral_normalize_torch(magnitudes):
 def spectral_de_normalize_torch(magnitudes):
     output = dynamic_range_decompression_torch(magnitudes)
     return output
+
+
+def safe_log(x: torch.Tensor, clip_val: float = 1e-7) -> torch.Tensor:
+    """
+    Computes the element-wise logarithm of the input tensor with clipping to avoid near-zero values.
+
+    Args:
+        x (Tensor): Input tensor.
+        clip_val (float, optional): Minimum value to clip the input tensor. Defaults to 1e-7.
+
+    Returns:
+        Tensor: Element-wise logarithm of the input tensor with clipping applied.
+    """
+    return torch.log(torch.clip(x, min=clip_val))
+
+
+class FeatureExtractor(nn.Module):
+    """Base class for feature extractors."""
+
+    def forward(self, audio: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        Extract features from the given audio.
+
+        Args:
+            audio (Tensor): Input audio waveform.
+
+        Returns:
+            Tensor: Extracted features of shape (B, C, L), where B is the batch size,
+                    C denotes output features, and L is the sequence length.
+        """
+        raise NotImplementedError("Subclasses must implement the forward method.")
+
+
+class MelSpectrogramFeatures(FeatureExtractor):
+    def __init__(self, sample_rate=24000, n_fft=1024, hop_length=256, win_length=None,
+                    n_mels=100, mel_fmin=0, mel_fmax=None, normalize=False, padding="center"):
+        super().__init__()
+        if padding not in ["center", "same"]:
+            raise ValueError("Padding must be 'center' or 'same'.")
+        self.padding = padding
+        self.mel_spec = torchaudio.transforms.MelSpectrogram(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            win_length=win_length,
+            power=1,
+            normalized=normalize,
+            f_min=mel_fmin,
+            f_max=mel_fmax,
+            n_mels=n_mels,
+            center=padding == "center",
+        )
+
+    def forward(self, audio, **kwargs):
+        if self.padding == "same":
+            pad = self.mel_spec.win_length - self.mel_spec.hop_length
+            audio = torch.nn.functional.pad(audio, (pad // 2, pad // 2), mode="reflect")
+        mel = self.mel_spec(audio)
+        mel = safe_log(mel)
+        return mel
 
 
 mel_basis = {}
@@ -151,7 +212,7 @@ def get_dataset_filelist1(a):
 class MelDataset(torch.utils.data.Dataset):
     def __init__(self, training_files, hparams, segment_size, n_fft, num_mels,
                  hop_size, win_size, sampling_rate,  fmin, fmax, split=True, shuffle=True, n_cache_reuse=1,
-                 device=None, fmax_loss=None, fine_tuning=False, base_mels_path=None, is_seen=True):
+                 device=None, fmax_loss=None, fine_tuning=False, base_mels_path=None, is_seen=True, mel_type="default"):
         self.audio_files = training_files
         random.seed(1234)
         if shuffle:
@@ -179,6 +240,17 @@ class MelDataset(torch.utils.data.Dataset):
         self.device = device
         self.fine_tuning = fine_tuning
         self.base_mels_path = base_mels_path
+        self.mel_type = mel_type
+
+        if mel_type == "pytorch":
+            self.mel_pytorch = MelSpectrogramFeatures(sampling_rate=sampling_rate,
+                                                      n_fft=n_fft,
+                                                      hop_length=hop_size,
+                                                      win_length=win_size,
+                                                      n_mels=num_mels,
+                                                      mel_fmin=fmin,)
+            print(f"Warning use torchaudio.transforms.MelSpectrogram extract mel.")
+
 
         '''
         print("INFO: checking dataset integrity...")
@@ -215,16 +287,22 @@ class MelDataset(torch.utils.data.Dataset):
                 else:
                     audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
 
-                mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
-                                      self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
-                                      center=False)
+                if self.mel_type == "pytorch":
+                    mel = self.mel_pytorch(audio)[0]
+                else:
+                    mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
+                                          self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
+                                          center=False)
             else: # validation step
                 # match audio length to self.hop_size * n for evaluation
                 if (audio.size(1) % self.hop_size) != 0:
                     audio = audio[:, :-(audio.size(1) % self.hop_size)]
-                mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
-                                      self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
-                                      center=False)
+                if self.mel_type == "pytorch":
+                    mel = self.mel_pytorch(audio)[0]
+                else:
+                    mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
+                                          self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
+                                          center=False)
                 assert audio.shape[1] == mel.shape[2] * self.hop_size, "audio shape {} mel shape {}".format(audio.shape, mel.shape)
 
         else:
@@ -246,9 +324,12 @@ class MelDataset(torch.utils.data.Dataset):
                     mel = torch.nn.functional.pad(mel, (0, frames_per_seg - mel.size(2)), 'constant')
                     audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
 
-        mel_loss = mel_spectrogram(audio, self.n_fft, self.num_mels,
-                                   self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax_loss,
-                                   center=False)
+        if self.mel_type == "pytorch":
+            mel_loss = self.mel_pytorch(audio)[0]
+        else:
+            mel_loss = mel_spectrogram(audio, self.n_fft, self.num_mels,
+                                       self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax_loss,
+                                       center=False)
 
         return (mel.squeeze(), audio.squeeze(0), filename, mel_loss.squeeze())
 
