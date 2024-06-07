@@ -20,7 +20,8 @@ def load_audio(audiopath, sampling_rate):
     return audio
 
 
-filelist = "filelist/val.list"
+filelist = "filelists/val.list"
+filelist = "filelists/train.list"
 
 
 def main():

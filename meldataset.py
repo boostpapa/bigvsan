@@ -27,8 +27,12 @@ def load_wav(full_path, sr_target):
     if sampling_rate != sr_target:
         #raise RuntimeError("Sampling rate of the file {} is {} Hz, but the model requires {} Hz".
         #      format(full_path, sampling_rate, sr_target))
-        print(f"Warning: {full_path}, wave shape: {data.shape}, sample_rate: {sampling_rate}")
-        data = librosa.resample(data, sampling_rate, sr_target)
+        try:
+            data = librosa.resample(data, sampling_rate, sr_target)
+            #print(f"Warning: {full_path}, wave shape: {data.shape}, sample_rate: {sampling_rate}")
+        except Exception as e:
+            print(f"Error: {full_path} resample")
+            return None
     return data, sr_target
 
 
