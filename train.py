@@ -195,7 +195,8 @@ def train(rank, a, h):
                     y_g_hat = generator(x.to(device))
                 y_mel = y_mel.to(device, non_blocking=True)
                 if h.mel_type == "pytorch":
-                    y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))
+                    nframe = int(y_g_hat.shape[-1]/h.hop_size)
+                    y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))[..., 0:nframe]
                 else:
                     y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
                                                   h.hop_size, h.win_size,
@@ -290,7 +291,8 @@ def train(rank, a, h):
 
             y_g_hat = generator(x)
             if h.mel_type == "pytorch":
-                y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))
+                nframe = int(y_g_hat.shape[-1] / h.hop_size)
+                y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))[0, 0:nframe]
             else:
                 y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size,
                                               h.fmin, h.fmax_for_loss)
