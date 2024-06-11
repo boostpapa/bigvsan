@@ -23,11 +23,14 @@ from env import AttrDict, build_env
 from meldataset import MelDataset, mel_spectrogram, MelSpectrogramFeatures, get_dataset_filelist1, MAX_WAV_VALUE
 from models import BigVSAN, MultiPeriodDiscriminator, MultiResolutionDiscriminator,\
     feature_loss, generator_loss, discriminator_loss
-from utils import plot_spectrogram, plot_spectrogram_clipped, scan_checkpoint, load_checkpoint, save_checkpoint, save_audio
+from utils import plot_spectrogram, plot_spectrogram_clipped, scan_checkpoint, load_checkpoint, save_checkpoint, save_audio, get_logger
 import torchaudio as ta
 from pesq import pesq
 from tqdm import tqdm
 import auraloss
+import logging
+
+logging.getLogger("numba").setLevel(logging.WARNING)
 
 torch.backends.cudnn.benchmark = False
 
@@ -55,12 +58,12 @@ def train(rank, a, h):
     print("Discriminator mrd params: {}".format(sum(p.numel() for p in mrd.parameters())))
 
     if h.mel_type == "pytorch":
-        mel_pytorch = MelSpectrogramFeatures(sampling_rate=h.sampling_rate,
+        mel_pytorch = MelSpectrogramFeatures(sample_rate=h.sampling_rate,
                                              n_fft=h.n_fft,
                                              hop_length=h.hop_size,
                                              win_length=h.win_size,
                                              n_mels=h.num_mels,
-                                             mel_fmin=h.fmin,)
+                                             mel_fmin=h.fmin,).to(device)
         print(f"Warning use torchaudio.transforms.MelSpectrogram extract mel.")
 
     # create or scan the latest checkpoint from checkpoints directory
@@ -68,6 +71,8 @@ def train(rank, a, h):
         print(generator)
         os.makedirs(a.checkpoint_path, exist_ok=True)
         print("checkpoints directory : ", a.checkpoint_path)
+        logger = get_logger(a.checkpoint_path)
+        logger.info(h)
 
     if os.path.isdir(a.checkpoint_path):
         cp_g = scan_checkpoint(a.checkpoint_path, 'g_')
@@ -181,7 +186,7 @@ def train(rank, a, h):
             print("step {} {} speaker validation...".format(steps, mode))
 
             # loop over validation set and compute metrics
-            for j, batch in tqdm(enumerate(loader)):
+            for j, batch in enumerate(loader):
                 x, y, _, y_mel = batch
                 y = y.to(device)
                 if hasattr(generator, 'module'):
@@ -190,7 +195,7 @@ def train(rank, a, h):
                     y_g_hat = generator(x.to(device))
                 y_mel = y_mel.to(device, non_blocking=True)
                 if h.mel_type == "pytorch":
-                    y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))[0]
+                    y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))
                 else:
                     y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
                                                   h.hop_size, h.win_size,
@@ -215,14 +220,15 @@ def train(rank, a, h):
                         sw.add_audio('gt_{}/y_{}'.format(mode, j), y[0], steps, h.sampling_rate)
                         if a.save_audio: # also save audio to disk if --save_audio is set to True
                             save_audio(y[0], os.path.join(a.checkpoint_path, 'samples', 'gt_{}'.format(mode), '{:04d}.wav'.format(j)), h.sampling_rate)
-                        sw.add_figure('gt_{}/y_spec_{}'.format(mode, j), plot_spectrogram(x[0]), steps)
+                        #sw.add_figure('gt_{}/y_spec_{}'.format(mode, j), plot_spectrogram(x[0]), steps)
 
                     sw.add_audio('generated_{}/y_hat_{}'.format(mode, j), y_g_hat[0], steps, h.sampling_rate)
                     if a.save_audio: # also save audio to disk if --save_audio is set to True
                         save_audio(y_g_hat[0, 0], os.path.join(a.checkpoint_path, 'samples', '{}_{:08d}'.format(mode, steps), '{:04d}.wav'.format(j)), h.sampling_rate)
+                    '''
                     # spectrogram of synthesized audio
                     if h.mel_type == "pytorch":
-                        y_hat_spec = mel_pytorch(y_g_hat.squeeze(1))[0]
+                        y_hat_spec = mel_pytorch(y_g_hat.squeeze(1))
                     else:
                         y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels,
                                                      h.sampling_rate, h.hop_size, h.win_size,
@@ -234,6 +240,7 @@ def train(rank, a, h):
                     spec_delta = torch.clamp(torch.abs(x[0] - y_hat_spec.squeeze(0).cpu()), min=1e-6, max=1.)
                     sw.add_figure('delta_dclip1_{}/spec_{}'.format(mode, j),
                                   plot_spectrogram_clipped(spec_delta.numpy(), clip_max=1.), steps)
+                    '''
 
             val_err = val_err_tot / (j + 1)
             val_pesq = val_pesq_tot / (j + 1)
@@ -250,9 +257,11 @@ def train(rank, a, h):
         if not a.skip_seen:
             validate(rank, a, h, validation_loader,
                      mode="seen_{}".format(train_loader.dataset.name))
+        '''
         for i in range(len(list_unseen_validation_loader)):
             validate(rank, a, h, list_unseen_validation_loader[i],
                      mode="unseen_{}".format(list_unseen_validation_loader[i].dataset.name))
+        '''
     # exit the script if --evaluate is set to True
     if a.evaluate:
         exit()
@@ -281,7 +290,7 @@ def train(rank, a, h):
 
             y_g_hat = generator(x)
             if h.mel_type == "pytorch":
-                y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))[0]
+                y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))
             else:
                 y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size,
                                               h.fmin, h.fmax_for_loss)
@@ -345,8 +354,10 @@ def train(rank, a, h):
                     with torch.no_grad():
                         mel_error = F.l1_loss(y_mel, y_g_hat_mel).item()
 
-                    print('Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
-                          format(steps, loss_gen_all, mel_error, time.time() - start_b))
+                    #print('Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
+                    #      format(steps, loss_gen_all, mel_error, time.time() - start_b), flush=True)
+                    logger.info('Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, lr : {:4.6f}, s/b : {:4.3f}'.
+                                format(steps, loss_gen_all, mel_error, scheduler_g.get_last_lr()[0], time.time() - start_b))
 
                 # checkpointing
                 if steps % a.checkpoint_interval == 0 and steps != 0:
@@ -381,18 +392,22 @@ def train(rank, a, h):
 
                 # validation
                 if steps % a.validation_interval == 0:
+                    '''
                     # plot training input x so far used
                     for i_x in range(x.shape[0]):
                         sw.add_figure('training_input/x_{}'.format(i_x), plot_spectrogram(x[i_x].cpu()), steps)
                         sw.add_audio('training_input/y_{}'.format(i_x), y[i_x][0], steps, h.sampling_rate)
+                    '''
 
                     # seen and unseen speakers validation loops
-                    if not a.debug and steps != 0:
+                    if not a.debug:
                         validate(rank, a, h, validation_loader,
                                  mode="seen_{}".format(train_loader.dataset.name))
+                        '''
                         for i in range(len(list_unseen_validation_loader)):
                             validate(rank, a, h, list_unseen_validation_loader[i],
                                      mode="unseen_{}".format(list_unseen_validation_loader[i].dataset.name))
+                        '''
             steps += 1
 
         scheduler_g.step()
