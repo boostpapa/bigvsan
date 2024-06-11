@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import glob
 import os
+import re
 import argparse
 import json
 import torch
@@ -52,22 +53,27 @@ def inference(a, h):
     generator.eval()
     generator.remove_weight_norm()
     with torch.no_grad():
-        for i, filname in enumerate(filelist):
-            # load the ground truth audio and resample if necessary
-            wav, sr = librosa.load(os.path.join(a.input_wavs_dir, filname), h.sampling_rate, mono=True)
-            wav = torch.FloatTensor(wav).to(device)
-            # compute mel spectrogram from the ground truth audio
-            x = get_mel(wav.unsqueeze(0))
+        #for i, filname in enumerate(filelist):
+        with open(a.test_file) as fin:
+            for line in fin:
+                wav_path = line.strip()
+                print(wav_path)
+                # load the ground truth audio and resample if necessary
+                wav, sr = librosa.load(wav_path, h.sampling_rate, mono=True)
+                wav = torch.FloatTensor(wav).to(device)
+                # compute mel spectrogram from the ground truth audio
+                x = get_mel(wav.unsqueeze(0))
+    
+                y_g_hat = generator(x)
+    
+                audio = y_g_hat.squeeze()
+                audio = audio * MAX_WAV_VALUE
+                audio = audio.cpu().numpy().astype('int16')
 
-            y_g_hat = generator(x)
-
-            audio = y_g_hat.squeeze()
-            audio = audio * MAX_WAV_VALUE
-            audio = audio.cpu().numpy().astype('int16')
-
-            output_file = os.path.join(a.output_dir, os.path.splitext(filname)[0] + '_generated.wav')
-            write(output_file, h.sampling_rate, audio)
-            print(output_file)
+                fname = re.split(r'/|\.', wav_path)[-2]
+                output_file = os.path.join(a.output_dir, fname + '_generated.wav')
+                write(output_file, h.sampling_rate, audio)
+                print(output_file)
 
 
 def main():
@@ -76,6 +82,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_wavs_dir', default='test_files')
     parser.add_argument('--output_dir', default='generated_files')
+    parser.add_argument('--test_file', required=True, help='test filelist')
     parser.add_argument('--checkpoint_file', required=True)
 
     a = parser.parse_args()
