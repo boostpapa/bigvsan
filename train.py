@@ -32,6 +32,12 @@ import logging
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 
+'''
+print(f"torch.backends.cuda.matmul.allow_tf32: {torch.backends.cuda.matmul.allow_tf32}")
+print(f"torch.backends.cudnn.allow_tf32: {torch.backends.cudnn.allow_tf32}")
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True  # If encontered training problem,please try to disable TF32.
+'''
 torch.backends.cudnn.benchmark = False
 
 def train(rank, a, h):
@@ -187,7 +193,8 @@ def train(rank, a, h):
 
             # loop over validation set and compute metrics
             for j, batch in enumerate(loader):
-                x, y, _, y_mel = batch
+                x, y, fn, y_mel = batch
+                print('valid: '.format(fn))
                 y = y.to(device)
                 if hasattr(generator, 'module'):
                     y_g_hat = generator.module(x.to(device))
@@ -250,6 +257,8 @@ def train(rank, a, h):
             sw.add_scalar("validation_{}/mel_spec_error".format(mode), val_err, steps)
             sw.add_scalar("validation_{}/pesq".format(mode), val_pesq, steps)
             sw.add_scalar("validation_{}/mrstft".format(mode), val_mrstft, steps)
+            logger.info('Steps : {:d}, mel_spec_error : {:4.3f}, pesq : {:4.3f}, mrstft : {:4.3f}'.
+                                format(steps, val_err, val_pesq, val_mrstft))
 
         generator.train()
 
@@ -292,7 +301,7 @@ def train(rank, a, h):
             y_g_hat = generator(x)
             if h.mel_type == "pytorch":
                 nframe = int(y_g_hat.shape[-1] / h.hop_size)
-                y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))[0, 0:nframe]
+                y_g_hat_mel = mel_pytorch(y_g_hat.squeeze(1))[..., 0:nframe]
             else:
                 y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size,
                                               h.fmin, h.fmax_for_loss)

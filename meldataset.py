@@ -241,7 +241,6 @@ class MelDataset(torch.utils.data.Dataset):
         self.fine_tuning = fine_tuning
         self.base_mels_path = base_mels_path
         self.mel_type = mel_type
-        self.nframe = int(segment_size/hop_size)
 
         if self.mel_type == "pytorch":
             self.mel_pytorch = MelSpectrogramFeatures(sample_rate=sampling_rate,
@@ -289,7 +288,7 @@ class MelDataset(torch.utils.data.Dataset):
                     audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
 
                 if self.mel_type == "pytorch":
-                    mel = self.mel_pytorch(audio)[..., 0:self.nframe]
+                    mel = self.mel_pytorch(audio)[..., 0:int(audio.size(1)/self.hop_size)]
                 else:
                     mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
                                           self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
@@ -299,7 +298,7 @@ class MelDataset(torch.utils.data.Dataset):
                 if (audio.size(1) % self.hop_size) != 0:
                     audio = audio[:, :-(audio.size(1) % self.hop_size)]
                 if self.mel_type == "pytorch":
-                    mel = self.mel_pytorch(audio)[..., 0:self.nframe]
+                    mel = self.mel_pytorch(audio)[..., 0:int(audio.size(1)/self.hop_size)]
                 else:
                     mel = mel_spectrogram(audio, self.n_fft, self.num_mels,
                                           self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax,
@@ -326,7 +325,7 @@ class MelDataset(torch.utils.data.Dataset):
                     audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), 'constant')
 
         if self.mel_type == "pytorch":
-            mel_loss = self.mel_pytorch(audio)[..., 0:self.nframe]
+            mel_loss = self.mel_pytorch(audio)[..., 0:int(audio.size(1)/self.hop_size)]
         else:
             mel_loss = mel_spectrogram(audio, self.n_fft, self.num_mels,
                                        self.sampling_rate, self.hop_size, self.win_size, self.fmin, self.fmax_loss,
