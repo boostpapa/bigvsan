@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import glob
 import os
+import re
 import numpy as np
 import argparse
 import json
@@ -41,29 +42,34 @@ def inference(a, h):
     state_dict_g = load_checkpoint(a.checkpoint_file, device)
     generator.load_state_dict(state_dict_g['generator'])
 
-    filelist = os.listdir(a.input_mels_dir)
+    #filelist = os.listdir(a.input_mels_dir)
 
     os.makedirs(a.output_dir, exist_ok=True)
 
     generator.eval()
     generator.remove_weight_norm()
     with torch.no_grad():
-        for i, filname in enumerate(filelist):
-            # load the mel spectrogram in .npy format
-            x = np.load(os.path.join(a.input_mels_dir, filname))
-            x = torch.FloatTensor(x).to(device)
-            if len(x.shape) == 2:
-                x = x.unsqueeze(0)
+        #for i, filname in enumerate(filelist):
+        with open(a.test_file) as fin:
+            for line in fin:
+                mel_path = line.strip()
+                print(mel_path)
+                # load the mel spectrogram in .npy format
+                x = np.load(os.path.join(a.input_mels_dir, mel_path))
+                x = torch.FloatTensor(x).to(device)
+                if len(x.shape) == 2:
+                    x = x.unsqueeze(0)
 
-            y_g_hat = generator(x)
+                y_g_hat = generator(x)
 
-            audio = y_g_hat.squeeze()
-            audio = audio * MAX_WAV_VALUE
-            audio = audio.cpu().numpy().astype('int16')
+                audio = y_g_hat.squeeze()
+                audio = audio * MAX_WAV_VALUE
+                audio = audio.cpu().numpy().astype('int16')
 
-            output_file = os.path.join(a.output_dir, os.path.splitext(filname)[0] + '_generated_e2e.wav')
-            write(output_file, h.sampling_rate, audio)
-            print(output_file)
+                fname = re.split(r'/|\.', mel_path)[-2]
+                output_file = os.path.join(a.output_dir, fname + '_generated_e2e.wav')
+                write(output_file, h.sampling_rate, audio)
+                print(output_file)
 
 
 def main():
@@ -72,6 +78,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_mels_dir', default='test_mel_files')
     parser.add_argument('--output_dir', default='generated_files_from_mel')
+    parser.add_argument('--test_file', required=True, help='test filelist')
     parser.add_argument('--checkpoint_file', required=True)
 
     a = parser.parse_args()

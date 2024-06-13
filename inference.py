@@ -11,7 +11,7 @@ import json
 import torch
 from scipy.io.wavfile import write
 from env import AttrDict
-from meldataset import mel_spectrogram, MAX_WAV_VALUE
+from meldataset import mel_spectrogram, MelSpectrogramFeatures, MAX_WAV_VALUE
 from models import BigVSAN as Generator
 import librosa
 
@@ -46,6 +46,15 @@ def inference(a, h):
     state_dict_g = load_checkpoint(a.checkpoint_file, device)
     generator.load_state_dict(state_dict_g['generator'])
 
+    if h.mel_type == "pytorch":
+        mel_pytorch = MelSpectrogramFeatures(sample_rate=h.sampling_rate,
+                                             n_fft=h.n_fft,
+                                             hop_length=h.hop_size,
+                                             win_length=h.win_size,
+                                             n_mels=h.num_mels,
+                                             mel_fmin=h.fmin,).to(device)
+        print(f"Warning use torchaudio.transforms.MelSpectrogram extract mel.")
+
     #filelist = os.listdir(a.input_wavs_dir)
 
     os.makedirs(a.output_dir, exist_ok=True)
@@ -62,7 +71,10 @@ def inference(a, h):
                 wav, sr = librosa.load(wav_path, h.sampling_rate, mono=True)
                 wav = torch.FloatTensor(wav).to(device)
                 # compute mel spectrogram from the ground truth audio
-                x = get_mel(wav.unsqueeze(0))
+                if h.mel_type == "pytorch":
+                    x = mel_pytorch(wav.unsqueeze(0))
+                else:
+                    x = get_mel(wav.unsqueeze(0))
     
                 y_g_hat = generator(x)
     
